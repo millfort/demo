@@ -1,0 +1,2 @@
+# intermediate ffmpeg output; the stream that the page actually uses is stream-data.js
+build/

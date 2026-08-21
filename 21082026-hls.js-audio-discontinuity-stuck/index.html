@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>hls.js 1.6.16 — audio stalls forever after EXT-X-DISCONTINUITY</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --line: #2a2f39; --tx: #e6e9ef; --dim: #8b93a3;
+    --audio: #4c9aff; --video: #4fd18b; --bad: #ff5c5c; --warn: #ffb54c; --head: #b9a3ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 18px; background: var(--bg); color: var(--tx);
+         font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  h2 { font-size: 12px; margin: 0 0 8px; color: var(--head); text-transform: uppercase;
+       letter-spacing: .08em; font-weight: 600; }
+  .sub { color: var(--dim); margin-bottom: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+           padding: 12px 14px; margin-bottom: 12px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+  .row > .panel { flex: 1; min-width: 300px; }
+  button { font: inherit; background: #2b3140; color: var(--tx); border: 1px solid var(--line);
+           border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+  button:hover:not(:disabled) { background: #363d4f; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: #2f5fd0; border-color: #3f74e8; }
+  button.primary:hover:not(:disabled) { background: #3a6ee0; }
+  input[type=number] { font: inherit; width: 70px; background: #12141a; color: var(--tx);
+                       border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; }
+  input[type=text] { font: inherit; background: #12141a; color: var(--tx); width: 100%;
+                     border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; }
+  label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  #verdict { padding: 14px; border-radius: 8px; font-size: 18px; font-weight: 700;
+             text-align: center; letter-spacing: .04em; border: 1px solid var(--line);
+             background: var(--panel); color: var(--dim); }
+  #verdict.ok   { background: #143024; border-color: #2b6b48; color: #7ee2a8; }
+  #verdict.dead { background: #3a1618; border-color: #7a2b2f; color: #ff8484; }
+  #verdict small { display: block; font-size: 12px; font-weight: 400; letter-spacing: 0;
+                   margin-top: 5px; opacity: .8; }
+  table.m { width: 100%; border-collapse: collapse; }
+  table.m td { padding: 3px 0; vertical-align: top; }
+  table.m td:first-child { color: var(--dim); padding-right: 12px; white-space: nowrap; }
+  table.m td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .flag-bad { color: var(--bad); font-weight: 700; }
+  .flag-ok { color: var(--video); }
+  #gate { font-size: 14px; text-align: center; padding: 10px; border-radius: 6px;
+          background: #12141a; border: 1px solid var(--line); }
+  #gate.closed { color: var(--bad); border-color: #7a2b2f; }
+  #gate.open { color: var(--video); }
+  canvas { width: 100%; height: 118px; display: block; }
+  .legend { display: flex; gap: 16px; color: var(--dim); font-size: 11px; margin-top: 6px;
+            flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 20px; height: 8px; border-radius: 2px;
+              margin-right: 5px; vertical-align: middle; }
+  #log { height: 300px; overflow-y: auto; background: #101217; border: 1px solid var(--line);
+         border-radius: 6px; padding: 8px; font-size: 11.5px; white-space: pre; }
+  #log div { padding: 1px 0; }
+  .l-sync { color: var(--bad); font-weight: 700; background: #3a1618; }
+  .l-audio { color: var(--audio); }
+  .l-video { color: var(--video); }
+  .l-init { color: var(--warn); }
+  .l-dim { color: #5c6474; }
+  .reqs { display: flex; gap: 12px; }
+  .reqs > div { flex: 1; min-width: 0; }
+  .reqcol { height: 190px; overflow-y: auto; background: #101217; border: 1px solid var(--line);
+            border-radius: 6px; padding: 6px 8px; font-size: 11.5px; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--head); }
+  pre { background: #101217; border: 1px solid var(--line); border-radius: 6px;
+        padding: 10px; overflow-x: auto; font-size: 11.5px; }
+  code { color: var(--warn); }
+  video { width: 260px; background: #000; border-radius: 6px; border: 1px solid var(--line); }
+  .hint { color: var(--dim); font-size: 11.5px; margin-top: 8px; }
+  .err { color: var(--bad); }
+</style>
+</head>
+<body>
+
+<h1>hls.js 1.6.16 — audio is never requested again after EXT-X-DISCONTINUITY</h1>
+<div class="sub">Self-contained: a synthetic 88-second stream with one discontinuity is embedded
+  in the page, hls.js comes stock from the CDN. Open this file directly or serve it — both work.</div>
+
+<div class="panel">
+  <h2>Source</h2>
+  <input type="text" id="src" value="">
+  <div class="row" style="margin-top:10px; align-items:center">
+    <button id="start" class="primary">Start</button>
+    <button id="stop" disabled>Stop</button>
+    <button id="revive" disabled>Revive audio</button>
+    <label>target discontinuity — sn of the first fragment after it:
+      <input type="number" id="targetsn" value="0" min="0" step="1" style="width:80px"></label>
+    <label><input type="checkbox" id="usedelay" checked>
+      hold back the video init segment for</label>
+    <input type="number" id="delayms" value="1500" min="0" max="10000" step="100"> ms
+  </div>
+  <div class="hint">The bundled playlist has exactly one discontinuity, so leave the target at
+    <code>0</code> = first discontinuity in the playlist. The field matters only if you point the
+    player at a real playlist with dozens of them.</div>
+  <div class="hint" id="hint">
+    The delay widens the race window from ~3 ms to the value above. The bug reproduces without it
+    too, but then it is a lottery: you have to land inside ~3 ms of a 100 ms tick. Uncheck the box
+    and press Start a few times to see it happen the way it happens in production.
+  </div>
+</div>
+
+<div class="panel" id="verdictpanel"><div id="verdict">not started</div></div>
+
+<div class="row">
+  <div class="panel" style="flex:0 0 auto">
+    <h2>Picture</h2>
+    <video id="v" muted playsinline></video>
+  </div>
+  <div class="panel">
+    <h2>audio-stream-controller state</h2>
+    <table class="m">
+      <tr><td>currentTime</td><td id="m-ct">—</td></tr>
+      <tr><td>discontinuity (EXT-X-DISCONTINUITY) at</td><td id="m-disc">—</td></tr>
+      <tr><td>audio buffered up to</td><td id="m-abuf">—</td></tr>
+      <tr><td>video buffered up to</td><td id="m-vbuf">—</td></tr>
+      <tr><td>hls.maxBufferLength</td><td id="m-maxbuf">—</td></tr>
+      <tr><td>audioStreamController.state</td><td id="m-astate">—</td></tr>
+      <tr><td>startFragRequested</td><td id="m-sfr">—</td></tr>
+      <tr><td>nextLoadPosition</td><td id="m-nlp">—</td></tr>
+      <tr><td>audio requests after the discontinuity</td><td id="m-areq">—</td></tr>
+      <tr><td>"Syncing with main frag"</td><td id="m-sync">—</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>The gate that decides everything</h2>
+  <div id="gate">—</div>
+  <div class="hint">
+    <code>doTickIdle()</code> in audio-stream-controller returns on its very first line,
+    <code>if (bufferLen &gt;= maxBufLen …) return;</code>. <code>bufferLen</code> is measured not
+    from the playhead but from <code>getLoadPosition()</code> — which, after the race, keeps
+    returning the frozen <code>nextLoadPosition</code>. The position never moves, so the
+    "buffer is full" verdict never changes.
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Buffers</h2>
+  <canvas id="cv"></canvas>
+  <div class="legend">
+    <span><i style="background:var(--audio)"></i>audio buffer</span>
+    <span><i style="background:var(--video)"></i>video buffer</span>
+    <span><i style="background:#fff"></i>playhead</span>
+    <span><i style="background:var(--bad)"></i>discontinuity</span>
+    <span><i style="background:var(--warn)"></i>frozen nextLoadPosition</span>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Segment requests</h2>
+  <div class="reqs">
+    <div><div style="color:var(--audio);margin-bottom:4px">audio (a1/)</div><div class="reqcol" id="reqa"></div></div>
+    <div><div style="color:var(--video);margin-bottom:4px">video (v1/)</div><div class="reqcol" id="reqv"></div></div>
+  </div>
+  <div class="hint">The right column keeps growing while the left one stops dead — that is the bug.</div>
+</div>
+
+<div class="panel">
+  <h2>hls.js log (filtered)
+    <button id="tosync" style="float:right;padding:2px 10px;font-size:11px">jump to the race</button>
+  </h2>
+  <div id="log"></div>
+</div>
+
+<div class="panel">
+  <h2>What this page adds on top of a plain player</h2>
+  <p style="color:var(--dim);margin-top:0">
+    Inside hls.js — <b>nothing</b>. It is stock <code>hls.js@1.6.16</code> from the CDN.
+    Exactly four things are added, and all four are marked in the source of this page with a
+    <code>// [PATCH N]</code> comment:
+  </p>
+  <ol style="color:var(--dim)">
+    <li><b>A logger.</b> <code>debug: {log, warn, …}</code> in the config, so that hls.js lines
+      end up on screen. Does not affect behaviour.</li>
+    <li><b>A start position.</b> Seek to <code>discontinuity − maxBufferLength − 10</code>, so the
+      player reaches the discontinuity with a <b>saturated</b> buffer. This is mandatory: seek
+      right next to the discontinuity and the buffer is empty, and the bug will not happen.</li>
+    <li><b>A delay on the video init segment</b> in the loader — purely so you do not have to win
+      a 3-millisecond lottery. Only the request with <code>frag.sn === 'initSegment'</code>,
+      <code>frag.type === 'main'</code> and <code>frag.cc &gt; 0</code> is held back. The checkbox
+      turns it off.</li>
+    <li><b>An in-memory loader.</b> The test stream lives in <code>stream-data.js</code> as base64;
+      the loader hands those bytes to hls.js instead of doing an XHR, which is what lets this page
+      run straight off the filesystem. It is a byte source and nothing else — no timing, buffering
+      or scheduling logic is touched. Type any real HLS URL into the Source field and the very same
+      loader falls through to the stock XHR loader.</li>
+  </ol>
+  <details>
+    <summary>Why delaying a video media segment gets you nowhere</summary>
+    <pre>// base-stream-controller.ts, _doFragLoad()
+result = this.fragmentLoader.load(frag, ...);                       // your loader is called here
+this.hls.trigger(Events.FRAG_LOADING, { frag, targetBufferTime });  // and this fires immediately</pre>
+    <p style="color:var(--dim)">
+      <code>FRAG_LOADING</code> sets <code>mainFragLoading = {cc: 1}</code> synchronously, before
+      your async delay ever runs. And the guard in <code>syncWithAnchor</code> looks at exactly
+      that <code>mainFragLoading.cc</code>:</p>
+    <pre>if (mainFragLoading?.cc === waitingToAppend.cc) return;   // 1 === 1 -> just keep waiting</pre>
+    <p style="color:var(--dim)">
+      So delaying a media segment does not open the window, it slams it shut. Init segments never
+      reach <code>mainFragLoading</code> at all:</p>
+    <pre>if (!this.audioOnly &amp;&amp; data.frag.type === MAIN &amp;&amp; isMediaFragment(data.frag)) {
+  this.mainFragLoading = data;      // NOT executed for sn === 'initSegment'
+}</pre>
+    <p style="color:var(--dim)">Hence the window = the time it takes to load the video init segment
+      at the discontinuity.</p>
+  </details>
+  <details>
+    <summary>What the "Revive audio" button does</summary>
+    <pre>const asc = hls.audioStreamController;
+asc.fragmentTracker.removeFragmentsInRange(0, Infinity, 'audio', false, true); // clear APPENDING
+asc.startLoad(video.currentTime);                                  // unfreeze nextLoadPosition</pre>
+    <p style="color:var(--dim)">
+      A plain <code>hls.stopLoad()/startLoad()</code> is not enough: it only cleans the tracker if
+      <code>fragCurrent</code> still has a live <code>loader</code>, and by that point it has been
+      released.</p>
+  </details>
+  <details>
+    <summary>How the test stream was made</summary>
+    <p style="color:var(--dim)">
+      <code>make-stream.sh</code> next to this file, ffmpeg only. Two independently encoded parts —
+      48 s of <code>testsrc2</code> + a 440 Hz pulsing tone, then 40 s of <code>smptebars</code> +
+      660 Hz — cut into 4-second fMP4 segments and glued together with an
+      <code>EXT-X-DISCONTINUITY</code>. Part B carries its own <code>EXT-X-MAP</code>, which is what
+      forces hls.js to fetch a video init segment at <code>cc &gt; 0</code>: that fetch is the race
+      window. Audio and video are separate renditions, so audio has its own stream controller —
+      without that split there is no bug to have.</p>
+  </details>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.16/dist/hls.js"></script>
+<script src="stream-data.js"></script>
+<script>
+'use strict';
+
+// ============================================================================
+// The config the bug was originally hit with. maxMaxBufferLength is the only
+// value that matters here: it decides how much content has to sit in front of
+// the discontinuity. 30 keeps the bundled stream small; the bug itself does not
+// care about the number, as long as the buffer is saturated on the way in.
+// ============================================================================
+const HLS_CONFIG = {
+  maxMaxBufferLength: 30,
+};
+
+// Virtual origin of the embedded stream. Nothing is ever fetched from it --
+// [PATCH 4] answers these URLs out of stream-data.js. Anything else goes to the
+// network through the stock loader.
+const STREAM_BASE = 'https://hls-demo.invalid/stream/';
+const NET_LATENCY_MS = 20;
+
+const $ = (id) => document.getElementById(id);
+const video = $('v');
+let hls = null, discStart = null, audioReqAfterDisc = 0, syncCount = 0;
+let seeked = false, frozenPos = null, timer = null, revived = false;
+
+$('src').value = STREAM_BASE + 'playlist.m3u8';
+
+// ---------------------------------------------------------------------------
+// [PATCH 3] Delay the video init segment, and nothing else.
+// [PATCH 4] Serve the embedded stream from memory, and nothing else.
+// Both live in one loader so hls.js keeps its single stock loader class.
+// ---------------------------------------------------------------------------
+function b64ToBuffer(b64) {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8.buffer;
+}
+
+function makeDemoLoader(initDelayMs) {
+  return class DemoLoader extends Hls.DefaultConfig.loader {
+    constructor(config) {
+      super(config);
+      this.memTimer = null;
+    }
+
+    load(context, config, callbacks) {
+      const f = context.frag;
+      // [PATCH 3]
+      const hold = (initDelayMs && f && f.type === 'main' && f.sn === 'initSegment' && f.cc > 0)
+        ? initDelayMs : 0;
+      if (hold) log('warn', '>>> [harness] holding ' + shortUrl(context.url) + ' for ' + hold + ' ms');
+
+      // [PATCH 4]
+      const key = context.url.indexOf(STREAM_BASE) === 0
+        ? context.url.slice(STREAM_BASE.length) : null;
+      const entry = (key && window.HLS_DEMO_STREAM) ? window.HLS_DEMO_STREAM[key] : null;
+
+      if (!entry) {                       // not ours -> stock XHR loader, delay included
+        if (hold) {
+          this.memTimer = setTimeout(() => super.load(context, config, callbacks), hold);
+        } else {
+          super.load(context, config, callbacks);
+        }
+        return;
+      }
+
+      this.context = context;
+      this.config = config;
+      this.callbacks = callbacks;
+      const stats = this.stats;
+      stats.loading.start = performance.now();
+
+      this.memTimer = setTimeout(() => {
+        this.memTimer = null;
+        const wantsBuffer = context.responseType === 'arraybuffer';
+        const data = entry.b64 !== undefined
+          ? (wantsBuffer ? b64ToBuffer(entry.b64) : atob(entry.b64))
+          : (wantsBuffer ? new TextEncoder().encode(entry.text).buffer : entry.text);
+        const len = data.byteLength !== undefined ? data.byteLength : data.length;
+        stats.loading.first = stats.loading.start + NET_LATENCY_MS / 2;
+        stats.loading.end = performance.now();
+        stats.loaded = stats.total = len;
+        callbacks.onSuccess({ url: context.url, data: data, code: 200 }, stats, context, null);
+      }, hold + NET_LATENCY_MS);
+    }
+
+    abort() {
+      if (this.memTimer !== null) {
+        clearTimeout(this.memTimer);
+        this.memTimer = null;
+        this.stats.aborted = true;
+      }
+      super.abort();
+    }
+
+    destroy() {
+      if (this.memTimer !== null) {
+        clearTimeout(this.memTimer);
+        this.memTimer = null;
+      }
+      super.destroy();
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Log
+// ---------------------------------------------------------------------------
+const logEl = $('log');
+const KEEP = /audio-stream-controller|Syncing|InitPTS|Reset loading|\[stream-controller\]: (Loading|Buffered|Media)|harness/;
+function log(level, msg) {
+  if (!KEEP.test(msg)) return;
+  const d = document.createElement('div');
+  let cls = 'l-dim';
+  if (/Syncing with main frag/.test(msg)) cls = 'l-sync';
+  else if (/InitPTS|harness/.test(msg)) cls = 'l-init';
+  else if (/audio-stream-controller/.test(msg)) cls = 'l-audio';
+  else if (/stream-controller/.test(msg)) cls = 'l-video';
+  d.className = cls;
+  d.textContent = (video.currentTime || 0).toFixed(2).padStart(9) + '  ' +
+                  msg.replace(/^\[(audio-)?stream-controller\]: /, (m) => m).slice(0, 200);
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+  if (/Syncing with main frag/.test(msg)) syncCount++;
+}
+const logger = {
+  log:   (...a) => log('log', a.join(' ')),
+  debug: (...a) => log('debug', a.join(' ')),
+  info:  (...a) => log('info', a.join(' ')),
+  warn:  (...a) => log('warn', a.join(' ')),
+  error: (...a) => log('error', a.join(' ')),
+};
+
+const shortUrl = (u) => (u || '').split('/').slice(-3).join('/');
+
+$('tosync').onclick = () => {
+  const el = logEl.querySelector('.l-sync');
+  if (el) el.scrollIntoView({ block: 'center' });
+};
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+$('start').onclick = () => {
+  stop();
+  logEl.innerHTML = '';
+  discStart = null; audioReqAfterDisc = 0; syncCount = 0; seeked = false; frozenPos = null;
+  revived = false;
+  audioDetails = null; videoDetails = null;
+  $('reqa').innerHTML = ''; $('reqv').innerHTML = '';
+  setVerdict('', 'loading the playlist…');
+
+  if (!window.Hls || !Hls.isSupported()) {
+    setVerdict('dead', 'hls.js failed to load, or MSE is unavailable');
+    return;
+  }
+
+  const cfg = Object.assign({}, HLS_CONFIG, {
+    debug: logger,                                        // [PATCH 1] logging only
+    loader: makeDemoLoader($('usedelay').checked ? (Number($('delayms').value) || 0) : 0),
+  });
+  log('warn', '>>> [harness] hls.js ' + Hls.version + ', maxMaxBufferLength=' +
+              HLS_CONFIG.maxMaxBufferLength + ', video init delay: ' +
+              ($('usedelay').checked ? $('delayms').value + ' ms' : 'off'));
+
+  hls = new Hls(cfg);
+  window.hls = hls;   // so you can poke at it from the console
+
+  hls.on(Hls.Events.ERROR, (e, d) => {
+    log('error', '>>> [harness] ERROR ' + d.type + ' / ' + d.details + (d.fatal ? ' (FATAL)' : ''));
+    if (d.fatal && d.type === Hls.ErrorTypes.NETWORK_ERROR && !discStart) {
+      setVerdict('dead', 'could not load the playlist — most likely CORS. See the hint below.');
+      $('hint').innerHTML = '<span class="err">The playlist failed to load. The bundled stream ' +
+        'needs no network at all, so this means the Source field points at a remote playlist ' +
+        'that does not allow cross-origin requests. Use a CORS-enabled URL, or put the demo ' +
+        'back to <code>' + STREAM_BASE + 'playlist.m3u8</code>.</span>';
+    }
+  });
+
+  // find the discontinuity in the AUDIO playlist
+  hls.on(Hls.Events.AUDIO_TRACK_LOADED, (e, d) => onDetails(d.details));
+  hls.on(Hls.Events.LEVEL_LOADED, (e, d) => onDetails(d.details, true));
+
+  // count the requests
+  hls.on(Hls.Events.FRAG_LOADING, (e, d) => {
+    const isAudio = d.frag.type === 'audio';
+    const line = document.createElement('div');
+    line.textContent = (video.currentTime || 0).toFixed(2).padStart(9) + '  sn ' +
+                       String(d.frag.sn).padEnd(12) + ' cc ' + d.frag.cc;
+    const col = $(isAudio ? 'reqa' : 'reqv');
+    col.appendChild(line); col.scrollTop = col.scrollHeight;
+    if (isAudio && discStart !== null && d.frag.start >= discStart - 0.001) audioReqAfterDisc++;
+  });
+
+  hls.attachMedia(video);
+  hls.loadSource($('src').value.trim());
+
+  $('start').disabled = true; $('stop').disabled = false; $('revive').disabled = false;
+  timer = setInterval(tick, 250);
+};
+
+let audioDetails = null, videoDetails = null;
+function onDetails(details, isVideo) {
+  if (isVideo) videoDetails = details; else audioDetails = details;
+  // wait for both playlists: the discontinuity is looked up in the audio one, and
+  // hls.maxBufferLength is only correct once the video level has loaded
+  if (seeked || !audioDetails || !videoDetails) return;
+  const frags = audioDetails.fragments;
+  if (!frags || !frags.length) return;
+
+  // aim at one specific discontinuity: the one followed by the given sn
+  const wantSn = Number($('targetsn').value) || 0;
+  let d = null;
+  if (wantSn) {
+    const i = frags.findIndex((f) => f.sn === wantSn);
+    if (i > 0 && frags[i].cc !== frags[i - 1].cc) d = frags[i];
+    else if (i > 0) log('warn', '>>> [harness] no EXT-X-DISCONTINUITY in front of sn ' + wantSn +
+      ' (cc ' + frags[i - 1].cc + '->' + frags[i].cc + '), falling back to the first one');
+    else if (i < 0) log('warn', '>>> [harness] sn ' + wantSn +
+      ' is not in the audio playlist, falling back to the first discontinuity');
+  }
+  if (!d) d = frags.find((f, i) => i > 0 && f.cc !== frags[i - 1].cc);
+  if (!d) { setVerdict('', 'the audio playlist has no EXT-X-DISCONTINUITY at all'); return; }
+  discStart = d.start;
+  const total = frags.filter((f, i) => i > 0 && f.cc !== frags[i - 1].cc).length;
+  log('warn', '>>> [harness] discontinuities in the audio playlist: ' + total +
+              '; target — in front of sn ' + d.sn + ', cc ' + (d.cc - 1) + '->' + d.cc +
+              ', starts at ' + d.start.toFixed(3));
+
+  // [PATCH 2] line up so that we hit the discontinuity with a FULL buffer
+  const margin = Math.max(hls.maxBufferLength || 0, 30);
+  const target = Math.max(0, discStart - margin - 10);
+  log('warn', '>>> [harness] seeking to ' + target.toFixed(3) +
+              ' (discontinuity ' + discStart.toFixed(3) + ' − maxBufferLength ' + margin + ' − 10)');
+  setVerdict('', 'filling the buffer, heading for the discontinuity…');
+  const go = () => {
+    if (seeked) return;
+    seeked = true;
+    video.currentTime = target;
+    video.play().catch((err) => log('error', '>>> [harness] play(): ' + err.message));
+  };
+  if (video.readyState >= 1) go(); else video.addEventListener('loadedmetadata', go, { once: true });
+}
+
+function stop() {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (hls) { hls.destroy(); hls = null; }
+  video.removeAttribute('src'); video.load();
+  $('start').disabled = false; $('stop').disabled = true; $('revive').disabled = true;
+}
+$('stop').onclick = () => { stop(); setVerdict('', 'stopped'); };
+
+$('revive').onclick = () => {
+  if (!hls) return;
+  revived = true;
+  const asc = hls.audioStreamController;
+  asc.fragmentTracker.removeFragmentsInRange(0, Infinity, 'audio', false, true);
+  asc.startLoad(video.currentTime);
+  log('warn', '>>> [harness] workaround applied: tracker cleared, startLoad(' +
+              video.currentTime.toFixed(3) + ')');
+};
+
+// ---------------------------------------------------------------------------
+// Polling
+// ---------------------------------------------------------------------------
+function ranges(buf) {
+  const r = [];
+  if (!buf) return r;
+  for (let i = 0; i < buf.length; i++) r.push([buf.start(i), buf.end(i)]);
+  return r;
+}
+function endAt(rs, pos) {
+  for (const [s, e] of rs) if (s <= pos + 0.1 && e > pos) return e;
+  return rs.length ? rs[rs.length - 1][1] : 0;
+}
+const f3 = (x) => (x === null || x === undefined || !isFinite(x)) ? '—' : x.toFixed(3);
+
+function tick() {
+  if (!hls) return;
+  const asc = hls.audioStreamController;
+  const sc = hls.streamController;
+  const aR = ranges(asc && asc.mediaBuffer && asc.mediaBuffer.buffered);
+  const vR = ranges(sc && sc.mediaBuffer && sc.mediaBuffer.buffered);
+  const ct = video.currentTime;
+  const aEnd = endAt(aR, ct), vEnd = endAt(vR, ct);
+  const maxBuf = hls.maxBufferLength;
+  const sfr = asc ? asc.startFragRequested : null;
+  const nlp = asc ? asc.nextLoadPosition : null;
+  frozenPos = (sfr === false) ? nlp : null;
+
+  $('m-ct').textContent = f3(ct);
+  $('m-disc').textContent = f3(discStart);
+  $('m-abuf').textContent = f3(aEnd);
+  $('m-vbuf').textContent = f3(vEnd);
+  $('m-maxbuf').textContent = maxBuf;
+  $('m-astate').textContent = asc ? asc.state : '—';
+  $('m-sfr').innerHTML = sfr === false
+    ? '<span class="flag-bad">false</span>' : '<span class="flag-ok">' + sfr + '</span>';
+  $('m-nlp').innerHTML = frozenPos !== null
+    ? '<span class="flag-bad">' + f3(nlp) + ' (frozen)</span>' : f3(nlp);
+  $('m-areq').textContent = audioReqAfterDisc;
+  $('m-sync').innerHTML = syncCount
+    ? '<span class="flag-bad">' + syncCount + '</span>' : '0';
+
+  // the gate arithmetic
+  const gatePos = (sfr === false) ? nlp : ct;
+  const fwd = endAt(aR, gatePos) - gatePos;
+  const g = $('gate');
+  if (!isFinite(fwd) || fwd < 0) { g.textContent = '—'; g.className = ''; }
+  else if (fwd >= maxBuf) {
+    g.className = 'closed';
+    g.textContent = 'bufferLen ' + fwd.toFixed(2) + '  >=  maxBufLen ' + maxBuf +
+                    '   ->   return, audio loads nothing' +
+                    (sfr === false ? '   (position stuck at ' + f3(nlp) + ')' : '');
+  } else {
+    g.className = 'open';
+    g.textContent = 'bufferLen ' + fwd.toFixed(2) + '  <  maxBufLen ' + maxBuf +
+                    '   ->   gate is open, audio may load';
+  }
+
+  // verdict
+  if (discStart !== null) {
+    if (sfr === false && vEnd - aEnd > 2) {
+      setVerdict('dead', 'after "Syncing with main frag" the audio-stream-controller has not ' +
+        'requested a single fragment. The audio buffer is stuck at ' + f3(aEnd) +
+        ' while video moved on to ' + f3(vEnd) + '.');
+    } else if (ct > discStart + 1 && aEnd > discStart) {
+      setVerdict('ok', revived
+        ? 'audio was revived by hand with the "Revive audio" button: the buffer grows again and ' +
+          'startFragRequested is back to true'
+        : 'audio made it through the discontinuity' + (syncCount
+            ? ' (the race fired ' + syncCount + ' time(s) but the player recovered — raise the ' +
+              'init segment delay and try again)'
+            : ' — the race window was missed, press Start again or raise the delay'));
+    }
+  }
+  draw(aR, vR, ct, maxBuf);
+}
+
+function setVerdict(cls, text) {
+  const v = $('verdict');
+  v.className = cls;
+  v.innerHTML = (cls === 'dead' ? 'AUDIO IS DEAD' : cls === 'ok' ? 'OK, audio is alive' : text) +
+                (cls ? '<small>' + text + '</small>' : '');
+}
+
+// ---------------------------------------------------------------------------
+// Buffer strip
+// ---------------------------------------------------------------------------
+const cv = $('cv'), cx = cv.getContext('2d');
+function draw(aR, vR, ct, maxBuf) {
+  const w = cv.clientWidth, h = 118;
+  if (cv.width !== w * 2) { cv.width = w * 2; cv.height = h * 2; cx.scale(2, 2); }
+  cx.clearRect(0, 0, w, h);
+  const center = discStart !== null ? discStart : ct;
+  const t0 = center - (maxBuf || 120) - 40, t1 = center + 80;
+  const X = (t) => ((t - t0) / (t1 - t0)) * w;
+
+  cx.fillStyle = '#101217'; cx.fillRect(0, 0, w, h);
+
+  const bar = (rs, y, color) => {
+    cx.fillStyle = color;
+    for (const [s, e] of rs) {
+      const x0 = Math.max(0, X(s)), x1 = Math.min(w, X(e));
+      if (x1 > x0) cx.fillRect(x0, y, x1 - x0, 22);
+    }
+  };
+  cx.fillStyle = '#8b93a3'; cx.font = '11px ui-monospace, monospace';
+  cx.fillText('audio', 4, 20);  bar(aR, 24, '#4c9aff');
+  cx.fillText('video', 4, 66);  bar(vR, 70, '#4fd18b');
+
+  // discontinuity
+  if (discStart !== null) {
+    cx.strokeStyle = '#ff5c5c'; cx.lineWidth = 2; cx.setLineDash([4, 3]);
+    cx.beginPath(); cx.moveTo(X(discStart), 12); cx.lineTo(X(discStart), h - 4); cx.stroke();
+    cx.setLineDash([]);
+    cx.fillStyle = '#ff5c5c';
+    cx.fillText('discontinuity ' + discStart.toFixed(1), X(discStart) + 4, 10);
+  }
+  // frozen position
+  if (frozenPos !== null && isFinite(frozenPos)) {
+    cx.strokeStyle = '#ffb54c'; cx.lineWidth = 2;
+    cx.beginPath(); cx.moveTo(X(frozenPos), 12); cx.lineTo(X(frozenPos), h - 4); cx.stroke();
+    cx.fillStyle = '#ffb54c';
+    cx.fillText('frozen ' + frozenPos.toFixed(1), X(frozenPos) + 4, h - 6);
+  }
+  // playhead
+  cx.strokeStyle = '#fff'; cx.lineWidth = 2;
+  cx.beginPath(); cx.moveTo(X(ct), 12); cx.lineTo(X(ct), h - 4); cx.stroke();
+}
+draw([], [], 0, 120);
+</script>
+</body>
+</html>
